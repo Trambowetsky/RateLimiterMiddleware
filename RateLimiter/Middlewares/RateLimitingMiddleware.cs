@@ -1,19 +1,20 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Options;
 
 namespace RateLimiter.Middlewares;
 
 public class RateLimitingMiddleware
 {
     private readonly RequestDelegate _next;
-    private static readonly TimeSpan _window = TimeSpan.FromSeconds(10);
-    private const int _maxRequests = 5;
+    private readonly RateLimitingOptions _options;
     
     private static readonly ConcurrentDictionary<string, ConcurrentQueue<DateTime>> _requests
         = new();
 
-    public RateLimitingMiddleware(RequestDelegate next)
+    public RateLimitingMiddleware(RequestDelegate next, IOptions<RateLimitingOptions> options)
     {
         _next = next;
+        _options = options.Value;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -23,11 +24,11 @@ public class RateLimitingMiddleware
 
         var queue = _requests.GetOrAdd(key, _ => new ConcurrentQueue<DateTime>());
 
-        while (queue.TryPeek(out var time) && time < now - _window)
+        while (queue.TryPeek(out var time) && time < now - TimeSpan.FromSeconds(_options.WindowSeconds))
         {
             queue.TryDequeue(out _);
         }
-        if (queue.Count >= _maxRequests)
+        if (queue.Count >= _options.MaxRequests)
         {
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             await context.Response.WriteAsync("Too many requests");
